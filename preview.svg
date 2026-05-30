@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="214">
+  <style>
+    .bg { fill: #1e1e2e; }
+    .bar { fill: #313244; }
+    .dot-r { fill: #f38ba8; }
+    .dot-y { fill: #f9e2af; }
+    .dot-g { fill: #a6e3a1; }
+    .title { fill: #cdd6f4; font-family: ui-monospace, 'SF Mono', 'Cascadia Code', Consolas, monospace; font-size: 13px; }
+    .t { fill: #cdd6f4; font-family: ui-monospace, 'SF Mono', 'Cascadia Code', Consolas, monospace; font-size: 13.5px; }
+    .dim { fill: #6c7086; }
+    .yellow { fill: #f9e2af; }
+    .prompt { fill: #cba6f7; }
+  </style>
+
+  <!-- Window chrome -->
+  <rect class="bg" width="720" height="214" rx="10"/>
+  <rect class="bar" width="720" height="36" rx="10"/>
+  <rect class="bg" x="0" y="26" width="720" height="10"/>
+  <circle class="dot-r" cx="20" cy="13" r="6"/>
+  <circle class="dot-y" cx="40" cy="13" r="6"/>
+  <circle class="dot-g" cx="60" cy="13" r="6"/>
+  <text class="title" x="360" y="17" text-anchor="middle">zsh-predictive-list</text>
+
+  <!-- Prompt: ❯ git c█ -->
+  <text class="t prompt" x="16" y="62">❯</text>
+  <text class="t" x="32" y="62">git c</text>
+  <rect x="72" y="49" width="8" height="17" rx="1" fill="#cdd6f4" opacity="0.7"/>
+
+  <!-- Header -->
+  <text class="t dim" x="16" y="84">[-/4]</text>
+
+  <!-- Item 1: git cherry-pick 91ab23f -->
+  <text class="t yellow" x="32" y="106">git c</text>
+  <text class="t dim" x="72" y="106">herry-pick 91ab23f</text>
+
+  <!-- Item 2: git config --global core.editor nvim -->
+  <text class="t yellow" x="32" y="128">git c</text>
+  <text class="t dim" x="72" y="128">onfig --global core.editor nvim</text>
+
+  <!-- Item 3: git commit -m "add widget prototype" -->
+  <text class="t yellow" x="32" y="150">git c</text>
+  <text class="t dim" x="72" y="150">ommit -m "add widget prototype"</text>
+
+  <!-- Item 4: git checkout -b feature/predictions -->
+  <text class="t yellow" x="32" y="172">git c</text>
+  <text class="t dim" x="72" y="172">heckout -b feature/predictions</text>
+</svg>

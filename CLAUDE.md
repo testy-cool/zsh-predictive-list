@@ -8,7 +8,7 @@ PSReadLine-style ListView prediction for zsh. Shows a list of matching commands 
 
 ## Development
 
-No build step. The entire plugin is `zsh-predictive-list.plugin.zsh` (329 lines). To test changes, source it in a zsh session:
+No build step. The entire plugin is `zsh-predictive-list.plugin.zsh`. To test changes, source it in a zsh session:
 
 ```zsh
 source ./zsh-predictive-list.plugin.zsh
@@ -20,16 +20,17 @@ There is no test suite or linter. Verify changes manually in a live zsh session.
 
 Single-file plugin with six functional layers:
 
-1. **Configuration & state** — `ZPRED_*` user variables and `_zpred_*` internal state (in-memory history array, matches, selection index, display tracking)
-2. **History I/O** — `_zpred_load()` reads success history file reverse-chronological and deduplicates; `_zpred_record()` appends successful commands
+1. **Configuration & state** — `ZPRED_*` user variables (including `ZPRED_MAX_HISTORY`, `ZPRED_MATCH_MODE`) and `_zpred_*` internal state
+2. **History I/O** — `_zpred_load()` reads success history reverse-chronological, deduplicates, caps at `ZPRED_MAX_HISTORY`; `_zpred_record()` appends and auto-truncates file at 2× cap; `zpred-import()` imports from `$HISTFILE`
 3. **Shell hooks** — `preexec` captures the command, `precmd` checks `$?` and records on success
-4. **Matching engine** — `_zpred_match()` prefix-matches typed input against in-memory history, limited to `ZPRED_MAX_SHOW`
-5. **Display system** — `_zpred_render()` builds POSTDISPLAY (no ghost text/inline suggestions), uses `region_highlight` for styling; `_zpred_clear_display()` tears it down
-6. **ZLE widgets & keybindings** — `zpred-down`, `zpred-up`, `zpred-tab`, `zpred-escape`, `zpred-toggle` bound to arrows/Tab/Ctrl+G/Alt+P
+4. **Matching engine** — `_zpred_match()` uses zsh parameter expansion (`${(@M)array:#pattern}`) for fast matching; supports `prefix` (default) and `contains` modes via `ZPRED_MATCH_MODE`
+5. **Display system** — `_zpred_render()` builds POSTDISPLAY, uses `region_highlight` for styling; `_zpred_clear_display()` tears it down
+6. **ZLE widgets & keybindings** — `zpred-down`, `zpred-up`, `zpred-tab`, `zpred-right`, `zpred-dismiss`, `zpred-delete-entry`, `zpred-toggle`
+7. **Lifecycle** — `_zpred_unload()` cleanly removes all hooks, widgets, and keybindings
 
-**Critical flow:** User types → `zle-line-pre-redraw` detects buffer change → `_zpred_match()` → `_zpred_render()` → POSTDISPLAY shows styled list. Arrow keys navigate, Tab accepts, Enter executes. Successful commands get recorded via `precmd` hook.
+**Critical flow:** User types → `zle-line-pre-redraw` detects buffer change → `_zpred_match()` → `_zpred_render()` → POSTDISPLAY shows styled list. Down enters navigation, Right accepts top prediction, Tab accepts during navigation, Enter executes. Successful commands get recorded via `precmd` hook.
 
-**Success history:** Plain text file at `~/.local/share/zsh-predictive-list/success_history` (configurable via `ZPRED_HISTORY`), one command per line.
+**Success history:** Plain text file at `~/.local/share/zsh-predictive-list/success_history` (configurable via `ZPRED_HISTORY`), one command per line. Auto-truncates when file exceeds 2× `ZPRED_MAX_HISTORY`.
 
 ## Key Design Constraints
 

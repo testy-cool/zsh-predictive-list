@@ -4,38 +4,33 @@
 # No ghost text — clean list below the prompt, exactly like PSReadLine.
 # Requires zsh >= 5.4 (for zle-line-pre-redraw).
 
-# Clean up history-list plugin hooks if present
-zmodload -F zsh/stat b:zstat 2>/dev/null
-autoload -Uz add-zle-hook-widget
-for _zpred_fn in _zhl_line_preredraw _zhl_line_init _zhl_line_finish; do
-  add-zle-hook-widget -d line-pre-redraw $_zpred_fn 2>/dev/null
-  add-zle-hook-widget -d line-init       $_zpred_fn 2>/dev/null
-  add-zle-hook-widget -d line-finish     $_zpred_fn 2>/dev/null
-done
-unset _zpred_fn
-
 (( ${+_ZPRED_LOADED} )) && return 0
 typeset -gi _ZPRED_LOADED=1
+
+zmodload -F zsh/stat b:zstat 2>/dev/null
+autoload -Uz add-zle-hook-widget add-zsh-hook
 
 # ── Configuration ───────────────────────────────────────────────
 typeset -g  ZPRED_HISTORY="${ZPRED_HISTORY:-${XDG_DATA_HOME:-$HOME/.local/share}/zsh-predictive-list/success_history}"
 typeset -gi ZPRED_MAX_SHOW=${ZPRED_MAX_SHOW:-6}
+typeset -gi ZPRED_MAX_HISTORY=${ZPRED_MAX_HISTORY:-5000}
+typeset -g  ZPRED_MATCH_MODE="${ZPRED_MATCH_MODE:-prefix}"
 typeset -g  ZPRED_STYLE_EMPHASIS="${ZPRED_STYLE_EMPHASIS:-fg=yellow}"
 typeset -g  ZPRED_STYLE_SELECTED="${ZPRED_STYLE_SELECTED:-standout}"
 typeset -g  ZPRED_STYLE_DIM="${ZPRED_STYLE_DIM:-fg=8}"
 typeset -gi ZPRED_ENABLED=1
 
 # ── Internal state ──────────────────────────────────────────────
-typeset -ga _zpred_mem=()          # success history (most-recent-first, deduped)
-typeset -ga _zpred_matches=()     # current prefix matches
-typeset -gi _zpred_sel=-1         # -1 = no selection, 0+ = selected index
-typeset -g  _zpred_typed=""       # what the user actually typed (before navigation)
-typeset -gi _zpred_dismissed=0    # 1 = list hidden by Escape
-typeset -gi _zpred_navigating=0   # 1 = skip next pre-redraw (we changed BUFFER ourselves)
-typeset -ga _zpred_hl=()          # our region_highlight entries
-typeset -g  _zpred_prev_buf=""    # change detection
-typeset -g  _zpred_last_cmd=""    # captured in preexec
-typeset -g  _zpred_hist_mtime="" # mtime of history file (for cross-session sync)
+typeset -ga _zpred_mem=()
+typeset -ga _zpred_matches=()
+typeset -gi _zpred_sel=-1
+typeset -g  _zpred_typed=""
+typeset -gi _zpred_dismissed=0
+typeset -gi _zpred_navigating=0
+typeset -ga _zpred_hl=()
+typeset -g  _zpred_prev_buf=""
+typeset -g  _zpred_last_cmd=""
+typeset -g  _zpred_hist_mtime=""
 
 # ── History I/O ─────────────────────────────────────────────────
 _zpred_load() {
@@ -48,6 +43,7 @@ _zpred_load() {
     (( ${+seen[$line]} )) && continue
     seen[$line]=1
     _zpred_mem+=("$line")
+    (( ${#_zpred_mem} >= ZPRED_MAX_HISTORY )) && break
   done < <(tac "$ZPRED_HISTORY" 2>/dev/null || tail -r "$ZPRED_HISTORY")
 }
 
@@ -56,6 +52,15 @@ _zpred_record() {
   [[ -d "${ZPRED_HISTORY:h}" ]] || mkdir -p "${ZPRED_HISTORY:h}"
   print -r -- "$cmd" >> "$ZPRED_HISTORY"
   _zpred_mem=("$cmd" "${(@)_zpred_mem:#$cmd}")
+  (( ${#_zpred_mem} > ZPRED_MAX_HISTORY )) && \
+    _zpred_mem=("${(@)_zpred_mem[1,ZPRED_MAX_HISTORY]}")
+  local lines
+  lines=$(wc -l < "$ZPRED_HISTORY" 2>/dev/null) || return
+  if (( lines > ZPRED_MAX_HISTORY * 2 )); then
+    local tmp="${ZPRED_HISTORY}.tmp.$$"
+    tail -n "$ZPRED_MAX_HISTORY" "$ZPRED_HISTORY" > "$tmp" && \
+      mv -f "$tmp" "$ZPRED_HISTORY"
+  fi
 }
 
 _zpred_sync() {
@@ -65,6 +70,30 @@ _zpred_sync() {
     mtime=$(command stat -c %Y "$ZPRED_HISTORY" 2>/dev/null) || return 0
   [[ "$mtime" == "$_zpred_hist_mtime" ]] && return 0
   _zpred_hist_mtime="$mtime"
+  _zpred_load
+}
+
+zpred-import() {
+  local src="${1:-$HISTFILE}"
+  [[ -r "$src" ]] || { print "zpred-import: cannot read $src" >&2; return 1; }
+  [[ -d "${ZPRED_HISTORY:h}" ]] || mkdir -p "${ZPRED_HISTORY:h}"
+  local -A seen=()
+  local line
+  if [[ -r "$ZPRED_HISTORY" ]]; then
+    while IFS= read -r line; do
+      [[ -n "$line" ]] && seen[$line]=1
+    done < "$ZPRED_HISTORY"
+  fi
+  local count=0
+  while IFS= read -r line; do
+    [[ "$line" == ': '[0-9]*';'* ]] && line="${line#*;}"
+    [[ -n "$line" && "$line" != *$'\n'* ]] || continue
+    (( ${+seen[$line]} )) && continue
+    seen[$line]=1
+    print -r -- "$line" >> "$ZPRED_HISTORY"
+    (( count++ ))
+  done < "$src"
+  print "zpred-import: imported $count commands from $src"
   _zpred_load
 }
 
@@ -80,7 +109,6 @@ _zpred_precmd() {
   _zpred_last_cmd=""
 }
 
-autoload -Uz add-zsh-hook
 add-zsh-hook preexec _zpred_preexec
 add-zsh-hook precmd  _zpred_precmd
 
@@ -89,12 +117,25 @@ _zpred_match() {
   _zpred_matches=()
   (( ZPRED_ENABLED )) || return
   [[ -n "$_zpred_typed" ]] || return
-  local c
-  for c in "${_zpred_mem[@]}"; do
-    [[ "$c" == "$_zpred_typed"* && "$c" != "$_zpred_typed" ]] || continue
-    _zpred_matches+=("$c")
-    (( ${#_zpred_matches} >= ZPRED_MAX_SHOW )) && break
-  done
+
+  _zpred_matches=("${(@M)_zpred_mem:#${_zpred_typed}*}")
+  _zpred_matches=("${(@)_zpred_matches:#${_zpred_typed}}")
+
+  if [[ "$ZPRED_MATCH_MODE" == "contains" ]] && (( ${#_zpred_matches} < ZPRED_MAX_SHOW )); then
+    local -a sub
+    sub=("${(@M)_zpred_mem:#*${_zpred_typed}*}")
+    sub=("${(@)sub:#${_zpred_typed}}")
+    local -A seen
+    local p; for p in "${_zpred_matches[@]}"; do seen[$p]=1; done
+    local s; for s in "${sub[@]}"; do
+      (( ${+seen[$s]} )) && continue
+      _zpred_matches+=("$s")
+      (( ${#_zpred_matches} >= ZPRED_MAX_SHOW )) && break
+    done
+  fi
+
+  (( ${#_zpred_matches} > ZPRED_MAX_SHOW )) && \
+    _zpred_matches=("${(@)_zpred_matches[1,ZPRED_MAX_SHOW]}")
 }
 
 # ── Display ─────────────────────────────────────────────────────
@@ -124,7 +165,6 @@ _zpred_render() {
   local pd=""
   local typed_len=${#_zpred_typed}
 
-  # ── Header: [sel/count] ──
   local sel_label
   (( _zpred_sel >= 0 )) && sel_label="$(( _zpred_sel + 1 ))" || sel_label="-"
   local header="[${sel_label}/${count}]"
@@ -134,7 +174,6 @@ _zpred_render() {
   _zpred_hl_add "$pos $(( pos + ${#header} )) $ZPRED_STYLE_DIM"
   (( pos += ${#header} ))
 
-  # ── List items ──
   local i match cmd_display line
   local cmd_max=$(( ${COLUMNS:-80} - 4 ))
   (( cmd_max < 20 )) && cmd_max=20
@@ -157,11 +196,11 @@ _zpred_render() {
     pd+=$'\n'"$line"
     (( pos += 1 ))
 
-    local ls=$pos                           # line start
-    local ms=$(( ls + 2 ))                  # after "> " or "  "
-    local te=$(( ms + typed_len ))          # typed-prefix end
-    local ce=$(( ms + ${#cmd_display} ))    # command end
-    local le=$(( ls + ${#line} ))           # full line end
+    local ls=$pos
+    local ms=$(( ls + 2 ))
+    local te=$(( ms + typed_len ))
+    local ce=$(( ms + ${#cmd_display} ))
+    local le=$(( ls + ${#line} ))
 
     (( te > ce )) && te=$ce
 
@@ -187,7 +226,6 @@ _zpred_line_init() {
   _zpred_prev_buf=""
   _zpred_hl=()
   _zpred_matches=()
-  # Don't set POSTDISPLAY here — it triggers a redraw that can re-enter line-init
 }
 
 _zpred_pre_redraw() {
@@ -198,7 +236,6 @@ _zpred_pre_redraw() {
   fi
   [[ "$BUFFER" != "$_zpred_prev_buf" ]] || return
   _zpred_prev_buf="$BUFFER"
-  # User typed something — update typed text, reset selection, un-dismiss
   _zpred_typed="$BUFFER"
   _zpred_sel=-1
   _zpred_dismissed=0
@@ -218,7 +255,6 @@ add-zle-hook-widget line-finish     _zpred_line_finish
 
 # ── Widgets ─────────────────────────────────────────────────────
 
-# ↓: enter list or move selection down. Buffer updates to match selection.
 zpred-down() {
   local count=${#_zpred_matches}
   if (( count && !_zpred_dismissed )); then
@@ -238,12 +274,10 @@ zpred-down() {
 }
 zle -N zpred-down
 
-# ↑: move selection up. At top → deselect and restore typed text.
 zpred-up() {
   local count=${#_zpred_matches}
   if (( count && !_zpred_dismissed && _zpred_sel >= 0 )); then
     if (( _zpred_sel == 0 )); then
-      # Back to no selection — restore what user typed
       _zpred_sel=-1
       _zpred_navigating=1
       BUFFER="$_zpred_typed"
@@ -263,33 +297,41 @@ zpred-up() {
 }
 zle -N zpred-up
 
-# Tab: select first item (if none selected) or accept selection and dismiss.
 zpred-tab() {
-  local count=${#_zpred_matches}
-  if (( count && !_zpred_dismissed )); then
-    if (( _zpred_sel == -1 )); then
-      # Select first item
-      _zpred_sel=0
-      _zpred_navigating=1
-      BUFFER="${_zpred_matches[1]}"
-      CURSOR=$#BUFFER
-      _zpred_prev_buf="$BUFFER"
-      _zpred_render
-    else
-      # Accept: keep buffer, dismiss list
-      _zpred_typed="$BUFFER"
-      _zpred_dismissed=1
-      _zpred_sel=-1
-      _zpred_clear_display
-    fi
+  if (( _zpred_sel >= 0 && ${#_zpred_matches} && !_zpred_dismissed )); then
+    _zpred_typed="$BUFFER"
+    _zpred_dismissed=1
+    _zpred_sel=-1
+    _zpred_clear_display
   else
     zle expand-or-complete
   fi
 }
 zle -N zpred-tab
 
-# Escape: dismiss list, restore typed text.
-zpred-escape() {
+zpred-right() {
+  if (( ${#_zpred_matches} && !_zpred_dismissed && CURSOR == $#BUFFER )); then
+    local target
+    if (( _zpred_sel >= 0 )); then
+      target="${_zpred_matches[$(( _zpred_sel + 1 ))]}"
+    else
+      target="${_zpred_matches[1]}"
+    fi
+    _zpred_typed="$target"
+    _zpred_dismissed=1
+    _zpred_sel=-1
+    _zpred_navigating=1
+    BUFFER="$target"
+    CURSOR=$#BUFFER
+    _zpred_prev_buf="$BUFFER"
+    _zpred_clear_display
+  else
+    zle forward-char
+  fi
+}
+zle -N zpred-right
+
+zpred-dismiss() {
   if (( ${#_zpred_matches} && !_zpred_dismissed )); then
     _zpred_dismissed=1
     _zpred_navigating=1
@@ -300,9 +342,32 @@ zpred-escape() {
     _zpred_clear_display
   fi
 }
-zle -N zpred-escape
+zle -N zpred-dismiss
 
-# Alt+P: toggle predictions on/off
+zpred-delete-entry() {
+  (( _zpred_sel >= 0 && ${#_zpred_matches} )) || return
+  local entry="${_zpred_matches[$(( _zpred_sel + 1 ))]}"
+  _zpred_mem=("${(@)_zpred_mem:#${entry}}")
+  if [[ -w "$ZPRED_HISTORY" ]]; then
+    local tmp="${ZPRED_HISTORY}.tmp.$$"
+    command grep -vxF -- "$entry" "$ZPRED_HISTORY" > "$tmp" && \
+      mv -f "$tmp" "$ZPRED_HISTORY"
+  fi
+  _zpred_clear_display
+  _zpred_match
+  (( _zpred_sel >= ${#_zpred_matches} )) && (( _zpred_sel = ${#_zpred_matches} - 1 ))
+  _zpred_navigating=1
+  if (( _zpred_sel >= 0 )); then
+    BUFFER="${_zpred_matches[$(( _zpred_sel + 1 ))]}"
+  else
+    BUFFER="$_zpred_typed"
+  fi
+  CURSOR=$#BUFFER
+  _zpred_prev_buf="$BUFFER"
+  _zpred_render
+}
+zle -N zpred-delete-entry
+
 zpred-toggle() {
   (( ZPRED_ENABLED = !ZPRED_ENABLED ))
   if (( ZPRED_ENABLED )); then
@@ -322,9 +387,31 @@ bindkey '^[[A'  zpred-up       # Up    (CSI)
 bindkey '^[OA'  zpred-up       # Up    (application)
 bindkey '^[[B'  zpred-down     # Down  (CSI)
 bindkey '^[OB'  zpred-down     # Down  (application)
+bindkey '^[[C'  zpred-right    # Right (CSI)
+bindkey '^[OC'  zpred-right    # Right (application)
 bindkey '^I'    zpred-tab      # Tab
-bindkey '^G'    zpred-escape   # Ctrl+G (dismiss list)
+bindkey '^G'    zpred-dismiss  # Ctrl+G
 bindkey '^[p'   zpred-toggle   # Alt+P
+
+# ── Unload ──────────────────────────────────────────────────────
+_zpred_unload() {
+  add-zsh-hook -d preexec _zpred_preexec
+  add-zsh-hook -d precmd  _zpred_precmd
+  add-zle-hook-widget -d line-init       _zpred_line_init
+  add-zle-hook-widget -d line-pre-redraw _zpred_pre_redraw
+  add-zle-hook-widget -d line-finish     _zpred_line_finish
+  bindkey '^[[A'  up-line-or-history
+  bindkey '^[OA'  up-line-or-history
+  bindkey '^[[B'  down-line-or-history
+  bindkey '^[OB'  down-line-or-history
+  bindkey '^[[C'  forward-char
+  bindkey '^[OC'  forward-char
+  bindkey '^I'    expand-or-complete
+  bindkey '^G'    send-break
+  bindkey -r '^[p'
+  _zpred_clear_display
+  unset _ZPRED_LOADED
+}
 
 # ── Init ────────────────────────────────────────────────────────
 _zpred_sync

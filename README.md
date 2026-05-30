@@ -6,14 +6,9 @@ Inspired by [PSReadLine](https://github.com/PowerShell/PSReadLine)'s `ListView` 
 
 ## What it does
 
-```
-❯ git c
-<-/4>                                           <History(4)>
-> git cherry-pick 91ab23f                          [History]
-> git config --global core.editor nvim             [History]
-> git commit -m "add zle widget prototype"         [History]
-> git checkout -b feature/psreadline-zsh           [History]
-```
+<p align="center">
+  <img src="preview.svg" alt="zsh-predictive-list preview" width="720">
+</p>
 
 - **No ghost text** — clean list below the prompt, not mixed into your input
 - **Header line** — shows `<-/N>` (no selection) or `<K/N>` (selected), with source count
@@ -46,12 +41,19 @@ source /path/to/zsh-predictive-list.plugin.zsh
 | Type anything | List updates automatically |
 | `Down` | Enter list / select next item (buffer updates to match) |
 | `Up` | Select previous item / deselect (restores typed text) |
-| `Tab` | Select first item, or accept current selection |
+| `Right` | Accept top prediction (or selected) when cursor is at end of line |
+| `Tab` | Accept current selection (only while navigating); otherwise normal completion |
 | `Enter` | Execute current buffer |
 | `Ctrl+G` | Dismiss list, restore typed text |
 | `Alt+P` | Toggle predictions on/off |
 
-When no predictions match, `Up`/`Down` fall back to normal history navigation.
+Additional widgets (not bound by default — bind them yourself if needed):
+
+| Widget | Action |
+|--------|--------|
+| `zpred-delete-entry` | Remove the selected entry from prediction history |
+
+When no predictions match, `Up`/`Down`/`Right` fall back to their normal behavior.
 
 ## Configuration
 
@@ -64,21 +66,39 @@ ZPRED_HISTORY="$HOME/.zsh_success_history"
 # Max visible predictions (default: 6)
 ZPRED_MAX_SHOW=8
 
+# Max entries kept in memory and on disk (default: 5000)
+ZPRED_MAX_HISTORY=5000
+
+# Match mode: "prefix" (default) or "contains" (substring matching, prefix results shown first)
+ZPRED_MATCH_MODE="contains"
+
 # Styles (zsh region_highlight format)
 ZPRED_STYLE_EMPHASIS="fg=yellow"      # matched prefix in unselected items
 ZPRED_STYLE_SELECTED="standout"       # selected item (reverse video)
 ZPRED_STYLE_DIM="fg=8"               # header, markers, source tags
 ```
 
+## Importing existing history
+
+New installs start with an empty prediction list. Import from your existing zsh history:
+
+```zsh
+zpred-import              # imports from $HISTFILE (handles both plain and EXTENDED_HISTORY format)
+zpred-import /path/to/file  # import from a specific file
+```
+
+Since exit codes aren't stored in `$HISTFILE`, all entries are imported. The prediction list will self-correct over time as successful commands get recorded.
+
 ## How it works
 
 1. `preexec` captures each command before execution
 2. `precmd` checks `$?` — if 0, the command is appended to the success history file
 3. `zle-line-pre-redraw` detects buffer changes and updates the prediction list
-4. Prefix matching runs against the deduplicated, most-recent-first success history
+4. Matching runs against the deduplicated, most-recent-first success history (prefix or substring)
 5. List renders via `POSTDISPLAY` + `region_highlight` (no ghost text)
 6. Navigation with ↓ updates BUFFER to the selected command; ↑ at top restores typed text
-7. Escape (Ctrl+G) dismisses the list; typing again un-dismisses it
+7. Ctrl+G dismisses the list; typing again un-dismisses it
+8. History file auto-truncates when it exceeds 2× `ZPRED_MAX_HISTORY`
 
 ## How it differs from other plugins
 
