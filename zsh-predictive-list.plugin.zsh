@@ -15,6 +15,7 @@ typeset -g  ZPRED_HISTORY="${ZPRED_HISTORY:-${XDG_DATA_HOME:-$HOME/.local/share}
 typeset -gi ZPRED_MAX_SHOW=${ZPRED_MAX_SHOW:-6}
 typeset -gi ZPRED_MAX_HISTORY=${ZPRED_MAX_HISTORY:-5000}
 typeset -g  ZPRED_MATCH_MODE="${ZPRED_MATCH_MODE:-prefix}"
+typeset -gi ZPRED_MIN_CHARS=${ZPRED_MIN_CHARS:-1}
 typeset -g  ZPRED_STYLE_EMPHASIS="${ZPRED_STYLE_EMPHASIS:-fg=yellow}"
 typeset -g  ZPRED_STYLE_SELECTED="${ZPRED_STYLE_SELECTED:-standout}"
 typeset -g  ZPRED_STYLE_DIM="${ZPRED_STYLE_DIM:-fg=8}"
@@ -116,7 +117,7 @@ add-zsh-hook precmd  _zpred_precmd
 _zpred_match() {
   _zpred_matches=()
   (( ZPRED_ENABLED )) || return
-  [[ -n "$_zpred_typed" ]] || return
+  (( ${#_zpred_typed} >= ZPRED_MIN_CHARS )) || return
 
   _zpred_matches=("${(@M)_zpred_mem:#${_zpred_typed}*}")
   _zpred_matches=("${(@)_zpred_matches:#${_zpred_typed}}")
