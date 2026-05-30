@@ -139,12 +139,16 @@ _zpred_match() {
 }
 
 # ── Display ─────────────────────────────────────────────────────
-_zpred_clear_display() {
+_zpred_clear_hl() {
   local h
   for h in "${_zpred_hl[@]}"; do
     region_highlight=("${(@)region_highlight:#$h}")
   done
   _zpred_hl=()
+}
+
+_zpred_clear_display() {
+  _zpred_clear_hl
   POSTDISPLAY=""
 }
 
@@ -154,12 +158,14 @@ _zpred_hl_add() {
 }
 
 _zpred_render() {
-  _zpred_clear_display
+  _zpred_clear_hl
   _zpred_match
 
   local count=${#_zpred_matches}
-  (( count )) || return
-  (( _zpred_dismissed )) && return
+  if (( !count || _zpred_dismissed )); then
+    POSTDISPLAY=""
+    return
+  fi
 
   local pos=$#BUFFER
   local pd=""
