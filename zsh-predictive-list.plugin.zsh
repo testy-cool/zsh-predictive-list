@@ -31,18 +31,32 @@ typeset -gi _zpred_navigating=0
 typeset -ga _zpred_hl=()
 typeset -g  _zpred_prev_buf=""
 typeset -g  _zpred_last_cmd=""
-typeset -g  _zpred_hist_mtime=""
+typeset -g  _zpred_hist_stamp=""
+typeset -gi _zpred_hist_lines=0
 
 # ── History I/O ─────────────────────────────────────────────────
+# Sets REPLY to the history file's mtime and size. A write from any shell
+# changes the size, even within the same second.
+_zpred_stamp() {
+  local -A st
+  if zstat -H st -- "$ZPRED_HISTORY" 2>/dev/null; then
+    REPLY="$st[mtime]:$st[size]"
+  else
+    REPLY=$(command stat -c %Y:%s -- "$ZPRED_HISTORY" 2>/dev/null)
+  fi
+}
+
 _zpred_load() {
   _zpred_mem=()
+  _zpred_hist_lines=0
   [[ -r "$ZPRED_HISTORY" ]] || return 0
+  _zpred_stamp; _zpred_hist_stamp=$REPLY
   # Read the file in one go, newest line first, keeping the first copy of
   # each command and dropping blank lines.
   local -a lines
-  lines=("${(@f)$(<"$ZPRED_HISTORY")}")
+  lines=(${(f)"$(<"$ZPRED_HISTORY")"})
+  _zpred_hist_lines=${#lines}
   _zpred_mem=("${(@u)${(@Oa)lines}}")
-  _zpred_mem=("${(@)_zpred_mem:#}")
   (( ${#_zpred_mem} > ZPRED_MAX_HISTORY )) && \
     _zpred_mem=("${(@)_zpred_mem[1,ZPRED_MAX_HISTORY]}")
 }
@@ -54,22 +68,20 @@ _zpred_record() {
   _zpred_mem=("$cmd" "${(@)_zpred_mem:#$cmd}")
   (( ${#_zpred_mem} > ZPRED_MAX_HISTORY )) && \
     _zpred_mem=("${(@)_zpred_mem[1,ZPRED_MAX_HISTORY]}")
-  local lines
-  lines=$(wc -l < "$ZPRED_HISTORY" 2>/dev/null) || return
-  if (( lines > ZPRED_MAX_HISTORY * 2 )); then
+  if (( ++_zpred_hist_lines > ZPRED_MAX_HISTORY * 2 )); then
     local tmp="${ZPRED_HISTORY}.tmp.$$"
     tail -n "$ZPRED_MAX_HISTORY" "$ZPRED_HISTORY" > "$tmp" && \
-      mv -f "$tmp" "$ZPRED_HISTORY"
+      mv -f "$tmp" "$ZPRED_HISTORY" && _zpred_hist_lines=$ZPRED_MAX_HISTORY
   fi
+  # Memory already holds this command, so only a write from another shell
+  # should make the next prompt read the file again.
+  _zpred_stamp; _zpred_hist_stamp=$REPLY
 }
 
 _zpred_sync() {
   [[ -r "$ZPRED_HISTORY" ]] || return 0
-  local mtime
-  mtime=$(zstat +mtime "$ZPRED_HISTORY" 2>/dev/null) || \
-    mtime=$(command stat -c %Y "$ZPRED_HISTORY" 2>/dev/null) || return 0
-  [[ "$mtime" == "$_zpred_hist_mtime" ]] && return 0
-  _zpred_hist_mtime="$mtime"
+  _zpred_stamp
+  [[ -z "$REPLY" || "$REPLY" == "$_zpred_hist_stamp" ]] && return 0
   _zpred_load
 }
 
