@@ -8,7 +8,7 @@
 typeset -gi _ZPRED_LOADED=1
 
 zmodload -F zsh/stat b:zstat 2>/dev/null
-autoload -Uz add-zle-hook-widget add-zsh-hook
+autoload -Uz add-zle-hook-widget add-zsh-hook is-at-least
 
 # ── Configuration ───────────────────────────────────────────────
 typeset -g  ZPRED_HISTORY="${ZPRED_HISTORY:-${XDG_DATA_HOME:-$HOME/.local/share}/zsh-predictive-list/success_history}"
@@ -152,11 +152,21 @@ _zpred_match() {
 }
 
 # ── Display ─────────────────────────────────────────────────────
+# zle moves region_highlight offsets while the buffer is edited, so an entry
+# stops matching the string it was added as. zsh 5.9 can tag entries with a
+# memo that survives the move. Older versions fall back to the strings.
+typeset -g _zpred_memo=""
+is-at-least 5.9 && _zpred_memo=" memo=zpred"
+
 _zpred_clear_hl() {
-  local h
-  for h in "${_zpred_hl[@]}"; do
-    region_highlight=("${(@)region_highlight:#$h}")
-  done
+  if [[ -n "$_zpred_memo" ]]; then
+    region_highlight=("${(@)region_highlight:#*$_zpred_memo}")
+  else
+    local h
+    for h in "${_zpred_hl[@]}"; do
+      region_highlight=("${(@)region_highlight:#$h}")
+    done
+  fi
   _zpred_hl=()
 }
 
@@ -166,8 +176,8 @@ _zpred_clear_display() {
 }
 
 _zpred_hl_add() {
-  _zpred_hl+=("$1")
-  region_highlight+=("$1")
+  _zpred_hl+=("$1$_zpred_memo")
+  region_highlight+=("$1$_zpred_memo")
 }
 
 _zpred_render() {
