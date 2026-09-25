@@ -10,11 +10,10 @@ Inspired by [PSReadLine](https://github.com/PowerShell/PSReadLine)'s `ListView` 
   <img src="preview.svg" alt="zsh-predictive-list preview" width="720">
 </p>
 
-- **No ghost text** — clean list below the prompt, not mixed into your input
-- **Header line** — shows `<-/N>` (no selection) or `<K/N>` (selected), with source count
-- **Source tags** — each item shows `[History]` right-aligned
-- **Success-only** — only commands that exited 0 feed predictions
-- **Buffer updates on navigation** — ↓ selects an item and puts it in your buffer, ↑ restores your typed text
+- **No ghost text.** The list sits below the prompt, not mixed into your input.
+- **Header line.** It shows `[-/N]` when nothing is selected and `[K/N]` when item K is selected.
+- **Success-only.** Only commands that exited 0 feed predictions.
+- **Buffer updates on navigation.** ↓ selects an item and puts it in your buffer, and ↑ restores your typed text.
 
 ## Install
 
@@ -44,7 +43,7 @@ source /path/to/zsh-predictive-list.plugin.zsh
 | `Right` | Accept top prediction (or selected) when cursor is at end of line |
 | `Tab` | Accept current selection (only while navigating); otherwise normal completion |
 | `Enter` | Execute current buffer |
-| `Ctrl+G` | Dismiss list, restore typed text |
+| `Ctrl+G` | Dismiss list and restore typed text, or cancel the line when no list is shown |
 | `Alt+P` | Toggle predictions on/off |
 
 Additional widgets (not bound by default — bind them yourself if needed):
@@ -53,7 +52,7 @@ Additional widgets (not bound by default — bind them yourself if needed):
 |--------|--------|
 | `zpred-delete-entry` | Remove the selected entry from prediction history |
 
-When no predictions match, `Up`/`Down`/`Right` fall back to their normal behavior.
+When no list is shown, `Up`, `Down`, `Right`, `Tab` and `Ctrl+G` keep their normal behavior. A line you recall from history shows no list until you edit it, so `Up` and `Down` move through history as usual.
 
 ## Configuration
 
@@ -66,16 +65,21 @@ ZPRED_HISTORY="$HOME/.zsh_success_history"
 # Max visible predictions (default: 6)
 ZPRED_MAX_SHOW=8
 
-# Max entries kept in memory and on disk (default: 5000)
+# Max distinct commands kept for predictions (default: 5000).
+# The file is trimmed to this many lines once it grows past twice that.
 ZPRED_MAX_HISTORY=5000
 
 # Match mode: "prefix" (default) or "contains" (substring matching, prefix results shown first)
 ZPRED_MATCH_MODE="contains"
 
+# Characters to type before the list appears (default: 1).
+# Try 2 or 3 in terminals that redraw slowly.
+ZPRED_MIN_CHARS=2
+
 # Styles (zsh region_highlight format)
-ZPRED_STYLE_EMPHASIS="fg=yellow"      # matched prefix in unselected items
+ZPRED_STYLE_EMPHASIS="fg=yellow"      # typed text inside unselected items
 ZPRED_STYLE_SELECTED="standout"       # selected item (reverse video)
-ZPRED_STYLE_DIM="fg=8"               # header, markers, source tags
+ZPRED_STYLE_DIM="fg=8"               # header and the rest of each unselected item
 ```
 
 ## Importing existing history
@@ -97,8 +101,9 @@ Since exit codes aren't stored in `$HISTFILE`, all entries are imported. The pre
 4. Matching runs against the deduplicated, most-recent-first success history (prefix or substring)
 5. List renders via `POSTDISPLAY` + `region_highlight` (no ghost text)
 6. Navigation with ↓ updates BUFFER to the selected command; ↑ at top restores typed text
-7. Ctrl+G dismisses the list; typing again un-dismisses it
-8. History file auto-truncates when it exceeds 2× `ZPRED_MAX_HISTORY`
+7. Ctrl+G dismisses the list, and typing again brings it back. With no list shown, Ctrl+G cancels the line.
+8. A line recalled from history shows no list until you edit it
+9. History file auto-truncates when it exceeds 2× `ZPRED_MAX_HISTORY`
 
 ## How it differs from other plugins
 
@@ -112,6 +117,7 @@ Since exit codes aren't stored in `$HISTFILE`, all entries are imported. The pre
 ## Requirements
 
 - zsh >= 5.4 (for `zle-line-pre-redraw`)
+- zsh 5.9 or later is recommended. On older versions, list colors can land in the wrong place while you edit a line.
 
 ## Compatibility
 
