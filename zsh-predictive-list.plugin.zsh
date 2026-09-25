@@ -396,6 +396,8 @@ zpred-toggle() {
     _zpred_pre_redraw
     zle -M "zsh-predictive-list: on"
   else
+    _zpred_matches=()
+    _zpred_sel=-1
     _zpred_clear_display
     zle -M "zsh-predictive-list: off"
   fi
