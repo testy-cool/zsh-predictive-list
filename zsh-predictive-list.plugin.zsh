@@ -227,16 +227,21 @@ _zpred_render() {
 
     local ls=$pos
     local ms=$(( ls + 2 ))
-    local te=$(( ms + typed_len ))
     local ce=$(( ms + ${#cmd_display} ))
     local le=$(( ls + ${#line} ))
+    # The typed text starts the entry in prefix mode, but in contains mode
+    # it can sit anywhere in it.
+    local before="${cmd_display%%${_zpred_typed}*}"
+    local ts=$(( ms + ${#before} ))
+    local te=$(( ts + typed_len ))
 
     (( te > ce )) && te=$ce
 
     if (( i - 1 == _zpred_sel )); then
       _zpred_hl_add "$ls $le $ZPRED_STYLE_SELECTED"
     else
-      (( te > ms )) && _zpred_hl_add "$ms $te $ZPRED_STYLE_EMPHASIS"
+      (( ts > ms )) && _zpred_hl_add "$ms $ts $ZPRED_STYLE_DIM"
+      (( te > ts )) && _zpred_hl_add "$ts $te $ZPRED_STYLE_EMPHASIS"
       (( ce > te )) && _zpred_hl_add "$te $ce $ZPRED_STYLE_DIM"
     fi
 
