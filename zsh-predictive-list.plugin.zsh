@@ -37,15 +37,14 @@ typeset -g  _zpred_hist_mtime=""
 _zpred_load() {
   _zpred_mem=()
   [[ -r "$ZPRED_HISTORY" ]] || return 0
-  local -A seen=()
-  local line
-  while IFS= read -r line; do
-    [[ -n "$line" ]] || continue
-    (( ${+seen[$line]} )) && continue
-    seen[$line]=1
-    _zpred_mem+=("$line")
-    (( ${#_zpred_mem} >= ZPRED_MAX_HISTORY )) && break
-  done < <(tac "$ZPRED_HISTORY" 2>/dev/null || tail -r "$ZPRED_HISTORY")
+  # Read the file in one go, newest line first, keeping the first copy of
+  # each command and dropping blank lines.
+  local -a lines
+  lines=("${(@f)$(<"$ZPRED_HISTORY")}")
+  _zpred_mem=("${(@u)${(@Oa)lines}}")
+  _zpred_mem=("${(@)_zpred_mem:#}")
+  (( ${#_zpred_mem} > ZPRED_MAX_HISTORY )) && \
+    _zpred_mem=("${(@)_zpred_mem[1,ZPRED_MAX_HISTORY]}")
 }
 
 _zpred_record() {
