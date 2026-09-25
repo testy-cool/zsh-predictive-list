@@ -358,6 +358,8 @@ zpred-dismiss() {
     CURSOR=$#BUFFER
     _zpred_prev_buf="$BUFFER"
     _zpred_clear_display
+  else
+    zle send-break
   fi
 }
 zle -N zpred-dismiss
