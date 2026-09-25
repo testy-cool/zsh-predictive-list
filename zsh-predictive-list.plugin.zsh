@@ -30,6 +30,7 @@ typeset -gi _zpred_dismissed=0
 typeset -gi _zpred_navigating=0
 typeset -ga _zpred_hl=()
 typeset -g  _zpred_prev_buf=""
+typeset -gi _zpred_prev_histno=0
 typeset -g  _zpred_last_cmd=""
 typeset -g  _zpred_hist_stamp=""
 typeset -gi _zpred_hist_lines=0
@@ -242,6 +243,7 @@ _zpred_line_init() {
   _zpred_dismissed=0
   _zpred_navigating=0
   _zpred_prev_buf=""
+  _zpred_prev_histno=$HISTNO
   _zpred_hl=()
   _zpred_matches=()
 }
@@ -252,11 +254,19 @@ _zpred_pre_redraw() {
     _zpred_navigating=0
     return
   fi
-  [[ "$BUFFER" != "$_zpred_prev_buf" ]] || return
+  [[ "$BUFFER" != "$_zpred_prev_buf" ]] || (( HISTNO != _zpred_prev_histno )) || return
   _zpred_prev_buf="$BUFFER"
+  _zpred_prev_histno=$HISTNO
   _zpred_typed="$BUFFER"
   _zpred_sel=-1
   _zpred_dismissed=0
+  # A line recalled from history gets no list until it is edited, so Up and
+  # Down keep moving through history.
+  if (( HISTNO != HISTCMD )) && [[ "$BUFFER" == "${history[$HISTNO]}" ]]; then
+    _zpred_matches=()
+    _zpred_clear_display
+    return
+  fi
   _zpred_render
 }
 
