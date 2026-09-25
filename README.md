@@ -13,6 +13,7 @@ Inspired by [PSReadLine](https://github.com/PowerShell/PSReadLine)'s `ListView` 
 - **No ghost text.** The list sits below the prompt, not mixed into your input.
 - **Header line.** It shows `[-/N]` when nothing is selected and `[K/N]` when item K is selected.
 - **Success-only.** Only commands that exited 0 feed predictions.
+- **Ranked by use.** Commands you run often and recently come first. Each run counts, and its weight halves every 50 commands.
 - **Buffer updates on navigation.** ↓ selects an item and puts it in your buffer, and ↑ restores your typed text.
 
 ## Install
@@ -98,7 +99,7 @@ Since exit codes aren't stored in `$HISTFILE`, all entries are imported. The pre
 1. `preexec` captures each command before execution
 2. `precmd` checks `$?` — if 0, the command is appended to the success history file
 3. `zle-line-pre-redraw` detects buffer changes and updates the prediction list
-4. Matching runs against the deduplicated, most-recent-first success history (prefix or substring)
+4. Matching runs against the deduplicated success history, best score first (prefix or substring). A command's score adds up its runs, and each run's weight halves every 50 commands.
 5. List renders via `POSTDISPLAY` + `region_highlight` (no ghost text)
 6. Navigation with ↓ updates BUFFER to the selected command; ↑ at top restores typed text
 7. Ctrl+G dismisses the list, and typing again brings it back. With no list shown, Ctrl+G cancels the line.
@@ -117,6 +118,7 @@ Since exit codes aren't stored in `$HISTFILE`, all entries are imported. The pre
 ## Requirements
 
 - zsh >= 5.4 (for `zle-line-pre-redraw`)
+- `awk` and `sort`, which score the history when a shell starts
 - zsh 5.9 or later is recommended. On older versions, list colors can land in the wrong place while you edit a line.
 
 ## Compatibility

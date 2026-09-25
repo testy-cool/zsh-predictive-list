@@ -34,6 +34,9 @@ typeset -gi _zpred_prev_histno=0
 typeset -g  _zpred_last_cmd=""
 typeset -g  _zpred_hist_stamp=""
 typeset -gi _zpred_hist_lines=0
+typeset -gA _zpred_score=()
+typeset -gi _zpred_since_load=0
+typeset -gi _zpred_half_life=50
 
 # ── History I/O ─────────────────────────────────────────────────
 # Sets REPLY to the history file's mtime and size. A write from any shell
@@ -47,17 +50,59 @@ _zpred_stamp() {
   fi
 }
 
+# Each run of a command adds 1 to its score, and the weight of a run halves
+# every _zpred_half_life lines of history. _zpred_mem holds the commands with
+# the highest score first. Scores are kept as of the last load.
 _zpred_load() {
   _zpred_mem=()
+  _zpred_score=()
   _zpred_hist_lines=0
+  _zpred_since_load=0
   [[ -r "$ZPRED_HISTORY" ]] || return 0
   _zpred_stamp; _zpred_hist_stamp=$REPLY
-  # Read the file in one go, newest line first, keeping the first copy of
-  # each command and dropping blank lines.
-  local -a lines
-  lines=(${(f)"$(<"$ZPRED_HISTORY")"})
-  _zpred_hist_lines=${#lines}
-  _zpred_mem=("${(@u)${(@Oa)lines}}")
+  # awk prints the line count, then the commands best first, then their
+  # scores in the same order. It treats history as plain text, so a $(...)
+  # in it never runs.
+  local -a out sc
+  out=(${(f)"$(LC_ALL=C awk -v h=$_zpred_half_life '
+    $0 != "" {
+      n++
+      s[$0] = ($0 in s) ? s[$0] * 0.5 ^ ((n - t[$0]) / h) + 1 : 1
+      t[$0] = n
+    }
+    END {
+      print n + 0; fflush()
+      sort = "LC_ALL=C sort -t \"\t\" -k1,1gr -k2,2nr"
+      for (c in s) printf "%.17g\t%d\t%s\n", s[c] * 0.5 ^ ((n - t[c]) / h), t[c], c | sort
+      close(sort)
+    }' "$ZPRED_HISTORY" | LC_ALL=C awk '
+    NR == 1 { print; next }
+    { sc[NR] = $0; sub(/\t.*/, "", sc[NR]); sub(/^[^\t]*\t[^\t]*\t/, ""); print }
+    END { for (i = 2; i <= NR; i++) print sc[i] }')"})
+  _zpred_hist_lines=${out[1]:-0}
+  local -i m=$(( (${#out} - 1) / 2 ))
+  _zpred_mem=("${(@)out[2,m+1]}")
+  sc=("${(@)out[m+2,-1]}")
+  _zpred_score=("${(@)_zpred_mem:^sc}")
+  (( m > ZPRED_MAX_HISTORY )) && _zpred_mem=("${(@)_zpred_mem[1,ZPRED_MAX_HISTORY]}")
+}
+
+# Adds a run of $1 to its score and moves it to its new place in the list.
+# A run k commands after the last load weighs 2^(k / half-life) on that scale.
+_zpred_add_score() {
+  local cmd="$1" old=${_zpred_score[$1]:-0} s
+  local new
+  (( _zpred_since_load++ ))
+  (( new = old + 2.0 ** (_zpred_since_load / (1.0 * _zpred_half_life)) ))
+  _zpred_score[$cmd]=$new
+  _zpred_mem=("${(@)_zpred_mem:#$cmd}")
+  local -i i=1 n=${#_zpred_mem}
+  while (( i <= n )); do
+    s=${_zpred_score[${_zpred_mem[i]}]}
+    (( s < new )) && break
+    (( i++ ))
+  done
+  _zpred_mem=("${(@)_zpred_mem[1,i-1]}" "$cmd" "${(@)_zpred_mem[i,-1]}")
   (( ${#_zpred_mem} > ZPRED_MAX_HISTORY )) && \
     _zpred_mem=("${(@)_zpred_mem[1,ZPRED_MAX_HISTORY]}")
 }
@@ -66,14 +111,18 @@ _zpred_record() {
   local cmd="$1"
   [[ -d "${ZPRED_HISTORY:h}" ]] || mkdir -p "${ZPRED_HISTORY:h}"
   print -r -- "$cmd" >> "$ZPRED_HISTORY"
-  _zpred_mem=("$cmd" "${(@)_zpred_mem:#$cmd}")
-  (( ${#_zpred_mem} > ZPRED_MAX_HISTORY )) && \
-    _zpred_mem=("${(@)_zpred_mem[1,ZPRED_MAX_HISTORY]}")
   if (( ++_zpred_hist_lines > ZPRED_MAX_HISTORY * 2 )); then
     local tmp="${ZPRED_HISTORY}.tmp.$$"
     tail -n "$ZPRED_MAX_HISTORY" "$ZPRED_HISTORY" > "$tmp" && \
-      mv -f "$tmp" "$ZPRED_HISTORY" && _zpred_hist_lines=$ZPRED_MAX_HISTORY
+      mv -f "$tmp" "$ZPRED_HISTORY"
   fi
+  # Trimming renumbers the lines, and a long session makes new weights huge,
+  # so both rebuild the scores from the file.
+  if (( _zpred_hist_lines > ZPRED_MAX_HISTORY * 2 || _zpred_since_load >= 500 * _zpred_half_life )); then
+    _zpred_load
+    return
+  fi
+  _zpred_add_score "$cmd"
   # Memory already holds this command, so only a write from another shell
   # should make the next prompt read the file again.
   _zpred_stamp; _zpred_hist_stamp=$REPLY
@@ -393,6 +442,7 @@ zpred-delete-entry() {
   (( _zpred_sel >= 0 && ${#_zpred_matches} )) || return
   local entry="${_zpred_matches[$(( _zpred_sel + 1 ))]}"
   _zpred_mem=("${(@)_zpred_mem:#${entry}}")
+  _zpred_score[$entry]=0
   if [[ -w "$ZPRED_HISTORY" ]]; then
     local tmp="${ZPRED_HISTORY}.tmp.$$"
     command grep -vxF -- "$entry" "$ZPRED_HISTORY" > "$tmp" && \
